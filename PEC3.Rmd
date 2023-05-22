@@ -1,0 +1,281 @@
+---
+title: "INTEGRACION DATASET"
+output: html_document
+date: "2023-05-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# INTEGRACION DATASETS
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(Seurat)
+library(patchwork)
+```
+```{r GSE124395}
+GSE124395_NF<- readRDS("C:/Users/sandr/Downloads/GSE124395/GSE124395_Normalhumanliverdata.RData")
+```
+
+```{r}
+GSE124395_NF<-CreateSeuratObject(counts=GSE124395_NF)
+GSE124395_NF
+```
+```{r}
+View(GSE124395_NF@meta.data)
+```
+
+```{r celseq}
+celseqbarcodes<- read.csv("C:/Users/sandr/Downloads/GSE124395/GSE124395_celseq_barcodes.192.txt")
+```
+```{r}
+View(celseqbarcodes)
+```
+
+```{r clusterparti}
+cluster<- read.csv("C:/Users/sandr/Downloads/GSE124395/GSE124395_clusterpartition.txt")
+View(cluster)
+```
+
+```{r QC}
+VlnPlot(GSE124395_NF, features = c("nFeature_RNA"))
+```
+```{r subset}
+GSE124395_NF_SUBSET_P301<-subset(GSE124395_NF, orig.ident=="P301")
+
+GSE124395_NF_SUBSET_P301
+GSE124395_NF_SUBSET_P304<-subset(GSE124395_NF, orig.ident=="P304")
+
+GSE124395_NF_SUBSET_P304
+GSE124395_NF_SUBSET_P308<-subset(GSE124395_NF, orig.ident=="P308")
+
+GSE124395_NF_SUBSET_P308
+GSE124395_NF_SUBSET_P309<-subset(GSE124395_NF, orig.ident=="P309")
+
+GSE124395_NF_SUBSET_P309
+GSE124395_NF_SUBSET_P310<-subset(GSE124395_NF, orig.ident=="P310")
+
+GSE124395_NF_SUBSET_P310
+GSE124395_NF_SUBSET_P311<-subset(GSE124395_NF, orig.ident=="P311")
+
+GSE124395_NF_SUBSET_P311
+```
+```{r}
+combinedP301P304<- merge(GSE124395_NF_SUBSET_P301,GSE124395_NF_SUBSET_P304)
+combinedP301P304
+```
+```{r}
+combinedP308<-merge(combinedP301P304,GSE124395_NF_SUBSET_P308)
+combinedP309<-merge(combinedP308,GSE124395_NF_SUBSET_P309)
+combinedP310<-merge(combinedP309,GSE124395_NF_SUBSET_P310)
+combined<-merge(combinedP310,GSE124395_NF_SUBSET_P311)
+
+combined
+```
+```{r QC}
+VlnPlot(combined, features = c("nFeature_RNA","nCount_RNA" ), ncol = 2)
+```
+```{r}
+plot1 <- FeatureScatter(combined, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1
+```
+```{r subset}
+
+P301 <- WhichCells(combined, expression = nFeature_RNA > 5000 & orig.ident == "P301")
+P304 <- WhichCells(combined, expression = nFeature_RNA > 4000 & orig.ident == "P304")
+P308 <- WhichCells(combined, expression = nFeature_RNA > 4000 & orig.ident == "P308")
+P309 <- WhichCells(combined, expression = nFeature_RNA > 3000 & orig.ident == "P309")
+P310 <- WhichCells(combined, expression = nFeature_RNA > 4000  & orig.ident == "P310")
+P311 <- WhichCells(combined, expression = nFeature_RNA > 3000  & orig.ident == "P311")
+
+combined_def <- subset(combined, cells=setdiff(WhichCells(combined),c(P301, P304, P308, P309, P310, P311)))
+
+ncol(combined)
+ncol(combined_def)
+
+```
+HEMOS PASADO DE 7133 CELULAS A 6989
+
+```{r MERGE}
+db<-merge(combined_def,GSE115469)
+```
+
+```{r VISUALIZAR}
+VlnPlot(db, features = c("nFeature_RNA","nCount_RNA" ), ncol = 2)
+plot1 <- FeatureScatter(db, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1
+```
+```{r lista}
+
+db.list <- SplitObject(db, split.by = "orig.ident")
+
+
+db.list <- lapply(X = db.list, FUN = function(x) {
+    x <- NormalizeData(x)
+    x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+
+features <- SelectIntegrationFeatures(object.list = db.list)
+
+
+```
+```{r integracion}
+immune.anchors <- FindIntegrationAnchors(object.list = db.list, anchor.features = features)
+
+immune.combined <- IntegrateData(anchorset = immune.anchors)
+```
+
+```{r integrated analysis}
+
+DefaultAssay(immune.combined) <- "integrated"
+
+immune.combined <- ScaleData(immune.combined)
+immune.combined <- RunPCA(immune.combined)
+
+ElbowPlot(immune.combined)
+
+immune.combined <- FindNeighbors(immune.combined, reduction = "pca", dims = 1:20)
+immune.combined <- FindClusters(immune.combined, reduction = "pca")
+immune.combined <- RunUMAP(immune.combined, reduction = "pca", dims = 1:20)
+
+```
+```{r visualizacion}
+p1 <- DimPlot(immune.combined, reduction = "umap", group.by = "orig.ident")
+p2 <- DimPlot(immune.combined, reduction = "umap", label = TRUE, repel = TRUE)
+p1 + p2
+```
+```{r}
+DimPlot(immune.combined, reduction = "umap", split.by = "orig.ident")
+```
+```{r ANNOTATION ScTypeload function}
+# load gene set preparation function
+source("https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/R/gene_sets_prepare.R")
+# load cell type annotation function
+source("https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/R/sctype_score_.R")
+
+```
+```{r}
+install.packages("xlsx", dependencies = TRUE)
+library(xlsx)
+```
+```{r}
+install.packages("openxlsx")
+library("openxlsx")
+```
+```{r}
+install.packages("HGNChelper")
+library(HGNChelper)
+```
+```{r}
+db_ = "https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/ScTypeDB_full.xlsx";
+tissue = "Liver" 
+# prepare gene sets
+gs_list = gene_sets_prepare(db_, tissue)
+```
+```{r}
+# get cell-type by cell matrix
+es.max = sctype_score(scRNAseqData = immune.combined[["integrated"]]@scale.data, scaled = TRUE, 
+                      gs = gs_list$gs_positive, gs2 = NULL) 
+
+# NOTE: scRNAseqData parameter should correspond to your input scRNA-seq matrix. 
+# In case Seurat is used, it is either pbmc[["RNA"]]@scale.data (default), pbmc[["SCT"]]@scale.data, in case sctransform is used for normalization,
+# or pbmc[["integrated"]]@scale.data, in case a joint analysis of multiple single-cell datasets is performed.
+
+# merge by cluster
+cL_resutls = do.call("rbind", lapply(unique(immune.combined@meta.data$seurat_clusters), function(cl){
+    es.max.cl = sort(rowSums(es.max[ ,rownames(immune.combined@meta.data[immune.combined@meta.data$seurat_clusters==cl, ])]), decreasing = !0)
+    head(data.frame(cluster = cl, type = names(es.max.cl), scores = es.max.cl, ncells = sum(immune.combined@meta.data$seurat_clusters==cl)), 10)
+}))
+sctype_scores = cL_resutls %>% group_by(cluster) %>% top_n(n = 1, wt = scores)  
+
+# set low-confident (low ScType score) clusters to "unknown"
+sctype_scores$type[as.numeric(as.character(sctype_scores$scores)) < sctype_scores$ncells/4] = "Unknown"
+print(sctype_scores[,1:3])
+```
+```{r}
+immune.combined@meta.data$customclassif = ""
+for(j in unique(sctype_scores$cluster)){
+  cl_type = sctype_scores[sctype_scores$cluster==j,]; 
+  immune.combined@meta.data$customclassif[immune.combined@meta.data$seurat_clusters == j] = as.character(cl_type$type[1])
+}
+
+DimPlot(immune.combined, 
+        
+        , label = TRUE, repel = TRUE, group.by = 'customclassif')        
+
+```
+```{r immune cells}
+immunecells <- subset(immune.combined, subset = customclassif == "Immune system cells")
+```
+
+```{r anotation immune cells}
+db_ = "https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/ScTypeDB_full.xlsx";
+tissue = "Immune system"
+
+# prepare gene sets
+gs_list = gene_sets_prepare(db_, tissue)
+
+
+# get cell-type by cell matrix
+es.max = sctype_score(scRNAseqData = immunecells[["integrated"]]@scale.data, scaled = TRUE, 
+                      gs = gs_list$gs_positive, gs2 = gs_list$gs_negative) 
+
+# NOTE: scRNAseqData parameter should correspond to your input scRNA-seq matrix. 
+# In case Seurat is used, it is either pbmc[["RNA"]]@scale.data (default), pbmc[["SCT"]]@scale.data, in case sctransform is used for normalization,
+# or pbmc[["integrated"]]@scale.data, in case a joint analysis of multiple single-cell datasets is performed.
+
+# merge by cluster
+cL_resutls = do.call("rbind", lapply(unique(immunecells@meta.data$seurat_clusters), function(cl){
+    es.max.cl = sort(rowSums(es.max[ ,rownames(immunecells@meta.data[immunecells@meta.data$seurat_clusters==cl, ])]), decreasing = !0)
+    head(data.frame(cluster = cl, type = names(es.max.cl), scores = es.max.cl, ncells = sum(immunecells@meta.data$seurat_clusters==cl)), 10)
+}))
+sctype_scores = cL_resutls %>% group_by(cluster) %>% top_n(n = 1, wt = scores)  
+
+# set low-confident (low ScType score) clusters to "unknown"
+sctype_scores$type[as.numeric(as.character(sctype_scores$scores)) < sctype_scores$ncells/4] = "Unknown"
+print(sctype_scores[,1:3])
+
+immunecells@meta.data$customclassif = ""
+for(j in unique(sctype_scores$cluster)){
+  cl_type = sctype_scores[sctype_scores$cluster==j,]; 
+  immunecells@meta.data$customclassif[immunecells@meta.data$seurat_clusters == j] = as.character(cl_type$type[1])
+}
+
+DimPlot(immunecells, reduction = "umap", label = TRUE, repel = TRUE, group.by = 'customclassif')        
+
+```
+```{r}
+# Cogemos el dataframe con la metadata del objeto seurat completo
+metadata_all <- immune.combined@meta.data
+
+# En ese dataframe, creamos una variable que se llama cell_type y le asignamos los valores de las anotaciones que ya teniamos (luego modificaremos esta variable nueva)
+metadata_all$cell_type <- metadata_all$customclassif
+
+# Cogemos el dataframe con la metadata del objeto seurat subset (el que contiene solo celulas immunitarias que ya has anotado)
+metadata_immune <- immunecells@meta.data
+
+# De la variable cell_type, cambiamos los valores de las células presentes en el subset immunitarias y les cambiamos la anotación por la nueva (la presente en el subset)
+metadata_all$cell_type[rownames(metadata_all) %in% rownames(metadata_immune)] <- metadata_immune$customclassif
+
+# Actualizamos el metadata del seurat completo
+immune.combined@meta.data <- metadata_all
+
+
+```
+
+```{r}
+DimPlot(immune.combined, reduction = "umap", label = TRUE, repel = TRUE, group.by = 'cell_type')  
+```
+
+
+
+
+
+
+
+
+
